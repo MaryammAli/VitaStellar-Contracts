@@ -161,4 +161,91 @@ mod tests {
         );
         assert_eq!(get_suggestion(Error::StorageFull), symbol_short!("CLN_OLD"));
     }
+
+    #[test]
+    fn test_pause_unpause() {
+        let (env, client, admin) = setup();
+        client.initialize(&admin);
+
+        // Initially not paused
+        assert!(!client.is_paused());
+
+        // Pause
+        client.pause(&admin);
+        assert!(client.is_paused());
+
+        // Unpause
+        client.unpause(&admin);
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    fn test_store_record_rejected_when_paused() {
+        let (env, client, admin) = setup();
+        client.initialize(&admin);
+        let patient_id = Address::generate(&env);
+        let record_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+
+        client.pause(&admin);
+
+        let result = client.try_store_record(&admin, &patient_id, &record_hash);
+        assert_eq!(result, Err(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn test_store_record_works_after_unpause() {
+        let (env, client, admin) = setup();
+        client.initialize(&admin);
+        let patient_id = Address::generate(&env);
+        let record_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+
+        client.pause(&admin);
+        client.unpause(&admin);
+
+        // Should work now
+        client.store_record(&admin, &patient_id, &record_hash);
+        assert!(client.verify_record(&patient_id, &record_hash));
+    }
+
+    #[test]
+    fn test_pause_requires_admin() {
+        let (env, client, _admin) = setup();
+        client.initialize(&_admin);
+        let non_admin = Address::generate(&env);
+
+        let result = client.try_pause(&non_admin);
+        assert_eq!(result, Err(Ok(Error::Unauthorized)));
+    }
+
+    #[test]
+    fn test_health_check_returns_ok() {
+        let (env, client, admin) = setup();
+        client.initialize(&admin);
+        env.ledger().set_timestamp(10_000);
+
+        let (status, version, timestamp) = client.health_check();
+        assert_eq!(status, soroban_sdk::symbol_short!("OK"));
+        assert_eq!(version, 1);
+        assert_eq!(timestamp, 10_000);
+    }
+
+    #[test]
+    fn test_health_check_not_init() {
+        let (env, client, _admin) = setup();
+        env.ledger().set_timestamp(10_000);
+
+        let (status, _version, _timestamp) = client.health_check();
+        assert_eq!(status, soroban_sdk::symbol_short!("NOT_INIT"));
+    }
+
+    #[test]
+    fn test_health_check_paused() {
+        let (env, client, admin) = setup();
+        client.initialize(&admin);
+        client.pause(&admin);
+        env.ledger().set_timestamp(10_000);
+
+        let (status, _version, _timestamp) = client.health_check();
+        assert_eq!(status, soroban_sdk::symbol_short!("PAUSED"));
+    }
 }
